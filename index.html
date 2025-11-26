@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ПСЭ (BKM) </title>
+<style>
+  :root{--green:#25d366;--dark:#075e54;--bg:#e5ddd5}
+  body{margin:0;font-family:Helvetica,Arial,sans-serif;background:var(--bg);height:100vh;display:flex;flex-direction:column}
+  #topBar{background:var(--dark);color:#fff;padding:14px;font-weight:600}
+  #users{background:#f6f6f6;padding:8px 12px;font-size:14px;color:#333}
+  #messagesBox{flex:1;overflow:auto;padding:12px}
+  #messages{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:8px}
+  .bubble{max-width:78%;padding:10px 12px;border-radius:8px;font-size:15px;line-height:1.3;word-break:break-word}
+  .me{align-self:flex-end;background:#dcf8c6;border-bottom-right-radius:2px}
+  .other{align-self:flex-start;background:#fff;border-bottom-left-radius:2px}
+  .meta{font-size:12px;color:#666;margin-bottom:6px}
+  img.msg-img{max-width:220px;border-radius:8px;display:block;margin-top:6px}
+  audio{display:block;margin-top:6px;width:220px}
+  #bottomBar{display:flex;gap:8px;padding:10px;background:#f0f0f0;align-items:center}
+  #textInput{flex:1;padding:10px;border-radius:20px;border:none;background:#fff;font-size:15px}
+  button.icon{width:44px;height:44px;border-radius:50%;border:none;background:var(--dark);color:#fff;font-size:18px;display:flex;align-items:center;justify-content:center}
+  #loginOverlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50}
+  #loginCard{background:#fff;padding:20px;border-radius:10px;width:320px;text-align:center}
+  #nickInput{width:100%;padding:10px;margin-top:8px;border-radius:8px;border:1px solid #ddd;font-size:16px}
+  #btnEnter{margin-top:12px;padding:10px 16px;background:var(--green);border:none;border-radius:8px;color:#fff;font-weight:600}
+</style>
+</head>
+<body>
+
+<div id="topBar">ПСЭ (BKM)</div>
+<div id="users">Сейчас в чате: —</div>
+
+<div id="messagesBox">
+  <ul id="messages"></ul>
+</div>
+
+<div id="bottomBar">
+  <input id="textInput" placeholder="Напишите сообщение..." autocomplete="off" />
+  <input id="fileInput" type="file" accept="image/*" style="display:none" />
+  <button id="btnPhoto" class="icon" title="Фото">📷</button>
+  <button id="btnRecord" class="icon" title="Запись">🎤</button>
+  <button id="btnSend" class="icon" title="Отправить">➤</button>
+</div>
+
+<div id="loginOverlay">
+  <div id="loginCard">
+    <h3>Введите ник</h3>
+    <input id="nickInput" placeholder="Ваш ник" />
+    <br/>
+    <button id="btnEnter">Войти</button>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+(function(){
+  const socket = io();
+  const messages = document.getElementById('messages');
+  const messagesBox = document.getElementById('messagesBox');
+  const usersDiv = document.getElementById('users');
+
+  const loginOverlay = document.getElementById('loginOverlay');
+  const nickInput = document.getElementById('nickInput');
+  const btnEnter = document.getElementById('btnEnter');
+
+  const textInput = document.getElementById('textInput');
+  const btnSend = document.getElementById('btnSend');
+  const btnPhoto = document.getElementById('btnPhoto');
+  const fileInput = document.getElementById('fileInput');
+  const btnRecord = document.getElementById('btnRecord');
+
+  let username = '';
+  let mediaRecorder = null;
+  let audioChunks = [];
+
+  function escapeHtml(s){
+    if (!s) return '';
+    return s.replace(/[&<>"']/g, function(c){
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]);
+    });
+  }
+
+  function addBubble(user, text, image, audio) {
+    const li = document.createElement('li');
+    const isMe = (user === username);
+    li.className = 'bubble ' + (isMe ? 'me' : 'other');
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = user;
+    li.appendChild(meta);
+
+    if(text){ const p = document.createElement('div'); p.innerHTML = escapeHtml(text); li.appendChild(p);}
+    if(image){ const img=document.createElement('img'); img.src=image; img.className='msg-img'; li.appendChild(img);}
+    if(audio){ const a=document.createElement('audio'); a.src=audio; a.controls=true; li.appendChild(a);}
+    messages.appendChild(li);
+    messagesBox.scrollTop = messagesBox.scrollHeight;
+  }
+
+  btnEnter.addEventListener('click', function(){
+    const v = nickInput.value.trim();
+    if(!v) return alert('Введите ник');
+    username = v;
+    socket.emit('set username', username);
+  });
+
+  socket.on('username accepted', function(){ loginOverlay.style.display='none'; });
+  socket.on('users list', list => { usersDiv.textContent = 'Сейчас в чате: '+list.join(', '); });
+  socket.on('system', txt => { const li=document.createElement('li'); li.className='meta'; li.style.textAlign='center'; li.style.fontStyle='italic'; li.textContent=txt; messages.appendChild(li); messagesBox.scrollTop=messagesBox.scrollHeight; });
+
+  socket.on('history', hist => { hist.forEach(m=>addBubble(m.user,m.text||'',m.image||'',m.audio||'')); });
+
+  socket.on('chat message', msg => { addBubble(msg.user,msg.text||'',msg.image||'',msg.audio||''); });
+
+  btnSend.addEventListener('click',()=>{ const t=textInput.value.trim(); if(!t)return; socket.emit('chat message',t); textInput.value=''; });
+  textInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); btnSend.click(); }});
+
+  btnPhoto.addEventListener('click',()=>fileInput.click());
+  fileInput.addEventListener('change', async function(){
+    const file=fileInput.files[0]; if(!file)return;
+    const fd=new FormData(); fd.append('file',file);
+    try{
+      btnPhoto.disabled=true;
+      const res=await fetch('/upload',{method:'POST',body:fd});
+      const j=await res.json();
+      if(j.url) socket.emit('chat message',{image:j.url});
+    }finally{ btnPhoto.disabled=false; fileInput.value=''; }
+  });
+
+  btnRecord.addEventListener('click', async ()=>{
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      audioChunks=[]; mediaRecorder=new MediaRecorder(stream);
+      mediaRecorder.ondataavailable=e=>audioChunks.push(e.data);
+      mediaRecorder.onstop=async ()=>{
+        const blob=new Blob(audioChunks,{type:'audio/webm'});
+        const fd=new FormData(); fd.append('audio',blob,'voice.webm');
+        btnRecord.disabled=true;
+        try{
+          const res=await fetch('/upload-audio',{method:'POST',body:fd});
+          const j=await res.json();
+          if(j.url) socket.emit('chat message',{audio:j.url});
+        }finally{ btnRecord.disabled=false; }
+      };
+      mediaRecorder.start();
+    }catch(e){alert('Не удалось получить доступ к микрофону'); console.error(e);}
+  });
+})();
+</script>
+</body>
+</html>
